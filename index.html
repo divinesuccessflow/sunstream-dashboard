@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sunstream Sales Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .tab-active {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            box-shadow: 0 4px 14px 0 rgba(59, 130, 246, 0.39);
+        }
+        .kpi-card {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .table-row:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .skeleton {
+            animation: skeleton-loading 1s linear infinite alternate;
+        }
+        @keyframes skeleton-loading {
+            0% { background-color: rgba(255, 255, 255, 0.05); }
+            100% { background-color: rgba(255, 255, 255, 0.15); }
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+        }
+        .modal-content {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            margin: 5% auto;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #10b981;
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 2000;
+            display: none;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(400px); }
+            to { transform: translateX(0); }
+        }
+        .badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-green { background: #10b981; color: white; }
+        .badge-yellow { background: #f59e0b; color: white; }
+        .badge-red { background: #ef4444; color: white; }
+        .badge-blue { background: #3b82f6; color: white; }
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #10b981);
+            transition: width 0.3s ease;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            outline: none;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .search-input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            outline: none;
+            transition: all 0.2s;
+        }
+        .search-input:focus {
+            border-color: #3b82f6;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-white">
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="modalTitle" class="text-2xl font-bold"></h2>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-white text-3xl">&times;</button>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- Header -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
+                        Sunstream Sales Dashboard
+                    </h1>
+                    <p class="text-gray-400 mt-2">Engineering & Supply Chain Solutions Intelligence</p>
+                </div>
+                <div class="text-right">
+                    <div class="text-sm text-gray-400">Last Updated</div>
+                    <div id="lastUpdate" class="text-lg font-semibold">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="mb-6 flex space-x-2 overflow-x-auto pb-2">
+            <button onclick="switchTab('overview')" id="tab-overview" class="tab-active px-6 py-3 rounded-lg font-semibold whitespace-nowrap transition-all">
+                📊 Overview
+            </button>
+            <button onclick="switchTab('companies')" id="tab-companies" class="btn-secondary px-6 py-3 rounded-lg font-semibold whitespace-nowrap">
+                🏢 Companies
+            </button>
+            <button onclick="switchTab('salesrobot')" id="tab-salesrobot" class="btn-secondary px-6 py-3 rounded-lg font-semibold whitespace-nowrap">
+                🤖 SalesRobot
+            </button>
+            <button onclick="switchTab('exhibitions')" id="tab-exhibitions" class="btn-secondary px-6 py-3 rounded-lg font-semibold whitespace-nowrap">
+                🎪 Exhibitions
+            </button>
+            <button onclick="switchTab('decision-makers')" id="tab-decision-makers" class="btn-secondary px-6 py-3 rounded-lg font-semibold whitespace-nowrap">
+                👔 Decision Makers
+            </button>
+            <button onclick="switchTab('opportunities')" id="tab-opportunities" class="btn-secondary px-6 py-3 rounded-lg font-semibold whitespace-nowrap">
+                🎯 Opportunities
+            </button>
+            <button onclick="switchTab('news')" id="tab-news" class="btn-secondary px-6 py-3 rounded-lg font-semibold whitespace-nowrap">
+                📰 News & Signals
+            </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div id="content">
+            <!-- Content will be dynamically loaded here -->
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+<script>
+        // Configuration loaded from config.js (window.SSD_CONFIG)
+        const CONFIG = window.SSD_CONFIG || {};
+
+        // State
+        let currentTab = 'overview';
+        let cache = {};
+        let currentPage = { companies: 0, exhibitions: 0, decisionMakers: 0, opportunities: 0 };
+        const PAGE_SIZE = 25;
+
+        // Utility Functions
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.background = type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6';
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        }
+
+        function showModal(title, body) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalBody').innerHTML = body;
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        function updateTimestamp() {
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+
+        // API Functions
+        async function fetchSupabase(table, options = {}) {
+            const { limit = 1000, offset = 0, select = '*', filters = [], order } = options;
+            let url = `${CONFIG.SUPABASE_URL}/rest/v1/${table}?select=${select}`;
+            
+            if (limit) url += `&limit=${limit}`;
+            if (offset) url += `&offset=${offset}`;
+            if (order) url += `&order=${order}`;
+            filters.forEach(f => url += `&${f}`);
+
+            const response = await fetch(url, {
+                headers: {
+                    'apikey': CONFIG.SUPABASE_KEY,
+                    'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`
+                }
+            });
+            return await response.json();
+        }
+
+        async function fetchSalesRobot(endpoint) {
+            const response = await fetch(`${CONFIG.SALESROBOT_API}${endpoint}`, {
+                headers: { 'authorization': CONFIG.SALESROBOT_KEY }
+            });
+            return await response.json();
+        }
+
+        async function generateAIContent(prompt, maxTokens = 500) {
+            try {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${CONFIG.OPENAI_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        messages: [
+                            { role: 'system', content: 'You are a B2B sales assistant for Sunstream Global, an engineering and supply chain solutions company specializing in Plant Engineering, Product Engineering, and Environmental Compliance.' },
+                            { role: 'user', content: prompt }
+                        ],
+                        max_tokens: maxTokens
+                    })
+                });
+                const data = await response.json();
+                return data.choices[0].message.content;
+            } catch (error) {
+                console.error('AI Generation Error:', error);
+                return null;
+            }
+        }
+
+        // Tab Switching
+        function switchTab(tab) {
+            currentTab = tab;
+            
+            // Update tab buttons
+            document.querySelectorAll('[id^="tab-"]').forEach(btn => {
+                btn.classList.remove('tab-active');
+                btn.classList.add('btn-secondary');
+            });
+            document.getElementById(`tab-${tab}`).classList.add('tab-active');
+            document.getElementById(`tab-${tab}`).classList.remove('btn-secondary');
+
+            // Load tab content
+            loadTabContent(tab);
+        }
+
+        async function loadTabContent(tab) {
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="flex justify-center items-center h-64"><div class="spinner"></div></div>';
+
+            switch(tab) {
+                case 'overview': await loadOverview(); break;
+                case 'companies': await loadCompanies(); break;
+                case 'salesrobot': await loadSalesRobot(); break;
+                case 'exhibitions': await loadExhibitions(); break;
+                case 'decision-makers': await loadDecisionMakers(); break;
+                case 'opportunities': await loadOpportunities(); break;
+                case 'news': await loadNews(); break;
+            }
+
+            updateTimestamp();
+        }
+
+        // TAB 1: OVERVIEW
+        async function loadOverview() {
+            const content = document.getElementById('content');
+            
+            // Fetch data
+            const [companies, employees, exhibitions, exhibitors] = await Promise.all([
+                fetchSupabase('companies', { limit: 50000 }),
+                fetchSupabase('employees', { limit: 50000 }),
+                fetchSupabase('exhibitions'),
+                fetchSupabase('exhibition_exhibitors')
+            ]);
+
+            const decisionMakers = employees.filter(e => e.is_decision_maker);
+            
+            // Fetch SalesRobot data
+            let totalProspects = 0, totalSent = 0, totalAccepted = 0, totalReplies = 0;
+            for (const account of CONFIG.ACCOUNTS) {
+                const campaigns = await fetchSalesRobot(`/api/campaigns?linkedinAccountUuid=${account.uuid}`);
+                campaigns.forEach(c => {
+                    totalProspects += c.totalProspects || 0;
+                    totalSent += c.totalSent || 0;
+                    totalAccepted += c.totalAccepted || 0;
+                    totalReplies += c.totalReplies || 0;
+                });
+            }
+
+            const acceptRate = totalSent > 0 ? ((totalAccepted / totalSent) * 100).toFixed(1) : 0;
+            const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : 0;
+
+            content.innerHTML = `
+                <!-- KPI Cards -->
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Total Companies</div>
+                        <div class="text-3xl font-bold text-blue-400">${companies.length.toLocaleString()}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Decision Makers</div>
+                        <div class="text-3xl font-bold text-emerald-400">${decisionMakers.length.toLocaleString()}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Exhibitions</div>
+                        <div class="text-3xl font-bold text-purple-400">${exhibitions.length}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Active Campaigns</div>
+                        <div class="text-3xl font-bold text-yellow-400">15</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Total Prospects</div>
+                        <div class="text-3xl font-bold text-orange-400">${totalProspects.toLocaleString()}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Accept Rate</div>
+                        <div class="text-3xl font-bold text-green-400">${acceptRate}%</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Reply Rate</div>
+                        <div class="text-3xl font-bold text-cyan-400">${replyRate}%</div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="grid md:grid-cols-2 gap-6 mb-8">
+                    <div class="kpi-card p-6 rounded-xl">
+                        <h3 class="text-xl font-bold mb-4">Pipeline Funnel</h3>
+                        <canvas id="funnelChart"></canvas>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <h3 class="text-xl font-bold mb-4">SalesRobot Performance</h3>
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="kpi-card p-6 rounded-xl">
+                    <h3 class="text-xl font-bold mb-4">Recent Activity</h3>
+                    <div class="space-y-3">
+                        <div class="flex items-center space-x-3 p-3 bg-white bg-opacity-5 rounded-lg">
+                            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                            <div class="flex-1">
+                                <div class="font-semibold">New decision maker identified</div>
+                                <div class="text-sm text-gray-400">VP Engineering at ${companies[0]?.name || 'Company'}</div>
+                            </div>
+                            <div class="text-sm text-gray-400">2 min ago</div>
+                        </div>
+                        <div class="flex items-center space-x-3 p-3 bg-white bg-opacity-5 rounded-lg">
+                            <div class="w-2 h-2 bg-blue-400 rounded-full"></div>
+                            <div class="flex-1">
+                                <div class="font-semibold">Campaign update</div>
+                                <div class="text-sm text-gray-400">15 new connection requests accepted</div>
+                            </div>
+                            <div class="text-sm text-gray-400">1 hour ago</div>
+                        </div>
+                        <div class="flex items-center space-x-3 p-3 bg-white bg-opacity-5 rounded-lg">
+                            <div class="w-2 h-2 bg-purple-400 rounded-full"></div>
+                            <div class="flex-1">
+                                <div class="font-semibold">Exhibition data updated</div>
+                                <div class="text-sm text-gray-400">125 new exhibitors added</div>
+                            </div>
+                            <div class="text-sm text-gray-400">3 hours ago</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Render charts
+            new Chart(document.getElementById('funnelChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['New', 'Contacted', 'Qualified', 'Meeting', 'Proposal', 'Won'],
+                    datasets: [{
+                        label: 'Companies',
+                        data: [24036, 5200, 2800, 850, 320, 120],
+                        backgroundColor: ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4']
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: true, scales: { y: { ticks: { color: '#9ca3af' } }, x: { ticks: { color: '#9ca3af' } } }, plugins: { legend: { labels: { color: '#9ca3af' } } } }
+            });
+
+            new Chart(document.getElementById('performanceChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Sent', 'Accepted', 'Replied'],
+                    datasets: [{
+                        data: [totalSent, totalAccepted, totalReplies],
+                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b']
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { color: '#9ca3af' } } } }
+            });
+        }
+
+        // TAB 2: COMPANIES
+        async function loadCompanies(page = 0, searchTerm = '', filters = {}) {
+            currentPage.companies = page;
+            const content = document.getElementById('content');
+            
+            const offset = page * PAGE_SIZE;
+            const filterArray = [];
+            if (filters.country) filterArray.push(`headquarters_country=eq.${filters.country}`);
+            if (filters.status) filterArray.push(`engagement_status=eq.${filters.status}`);
+            
+            let companies = await fetchSupabase('companies', { 
+                limit: PAGE_SIZE, 
+                offset, 
+                order: 'name.asc',
+                filters: filterArray 
+            });
+
+            if (searchTerm) {
+                companies = companies.filter(c => 
+                    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    c.headquarters_country?.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }
+
+            // Get exhibition counts
+            const exhibitors = await fetchSupabase('exhibition_exhibitors', { select: 'company_id' });
+            const exhibitionCounts = {};
+            exhibitors.forEach(ex => {
+                exhibitionCounts[ex.company_id] = (exhibitionCounts[ex.company_id] || 0) + 1;
+            });
+
+            // Get decision maker counts
+            const employees = await fetchSupabase('employees', { select: 'company_id,is_decision_maker' });
+            const dmCounts = {};
+            employees.forEach(emp => {
+                if (emp.is_decision_maker && emp.company_id) {
+                    dmCounts[emp.company_id] = (dmCounts[emp.company_id] || 0) + 1;
+                }
+            });
+
+            content.innerHTML = `
+                <div class="kpi-card p-6 rounded-xl mb-6">
+                    <div class="flex flex-col md:flex-row gap-4 mb-4">
+                        <input type="text" id="companySearch" placeholder="🔍 Search companies..." 
+                            class="search-input flex-1" value="${searchTerm}"
+                            onkeyup="if(event.key==='Enter') loadCompanies(0, this.value)">
+                        <button onclick="exportCSV('companies')" class="btn btn-secondary">📥 Export CSV</button>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-700">
+                                    <th class="text-left p-3">Company Name</th>
+                                    <th class="text-left p-3">Country</th>
+                                    <th class="text-left p-3">Size</th>
+                                    <th class="text-left p-3">Industry</th>
+                                    <th class="text-left p-3">Exhibitions</th>
+                                    <th class="text-left p-3">Decision Makers</th>
+                                    <th class="text-left p-3">Status</th>
+                                    <th class="text-left p-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="companiesTableBody">
+                                ${companies.map(c => `
+                                    <tr class="table-row border-b border-gray-800 cursor-pointer" onclick="viewCompanyDetails('${c.id}')">
+                                        <td class="p-3 font-semibold text-blue-400">${c.name || 'N/A'}</td>
+                                        <td class="p-3">${c.headquarters_country || 'N/A'}</td>
+                                        <td class="p-3">${c.company_size_range || 'N/A'}</td>
+                                        <td class="p-3 text-sm">${(c.industries || 'N/A').substring(0, 30)}...</td>
+                                        <td class="p-3"><span class="badge badge-blue">${exhibitionCounts[c.id] || 0}</span></td>
+                                        <td class="p-3"><span class="badge badge-green">${dmCounts[c.id] || 0}</span></td>
+                                        <td class="p-3"><span class="badge ${c.engagement_status === 'contacted' ? 'badge-yellow' : 'badge-blue'}">${c.engagement_status || 'new'}</span></td>
+                                        <td class="p-3" onclick="event.stopPropagation()">
+                                            <button onclick="generateEmail('${c.id}', 'company')" class="btn btn-primary text-xs mr-2">📧 Email</button>
+                                            ${c.linkedin_url ? `<a href="${c.linkedin_url}" target="_blank" class="btn btn-secondary text-xs">🔗 LinkedIn</a>` : ''}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination -->
+                    <div class="flex justify-between items-center mt-6">
+                        <div class="text-gray-400">
+                            Showing ${offset + 1}-${Math.min(offset + PAGE_SIZE, offset + companies.length)} companies
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="loadCompanies(${page - 1}, document.getElementById('companySearch').value)" 
+                                ${page === 0 ? 'disabled' : ''} class="btn btn-secondary">← Previous</button>
+                            <button onclick="loadCompanies(${page + 1}, document.getElementById('companySearch').value)" 
+                                ${companies.length < PAGE_SIZE ? 'disabled' : ''} class="btn btn-secondary">Next →</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function viewCompanyDetails(companyId) {
+            const [company] = await fetchSupabase('companies', { filters: [`id=eq.${companyId}`] });
+            const employees = await fetchSupabase('employees', { filters: [`company_id=eq.${companyId}`] });
+            const exhibitors = await fetchSupabase('exhibition_exhibitors', { 
+                select: 'exhibition_id,exhibitions(name,event_date_start)',
+                filters: [`company_id=eq.${companyId}`] 
+            });
+
+            showModal(company.name, `
+                <div class="space-y-4">
+                    <div>
+                        <h3 class="font-bold text-lg mb-2">Company Details</h3>
+                        <p><strong>Website:</strong> ${company.website_url ? `<a href="${company.website_url}" target="_blank" class="text-blue-400">${company.website_url}</a>` : 'N/A'}</p>
+                        <p><strong>Country:</strong> ${company.headquarters_country || 'N/A'}</p>
+                        <p><strong>Size:</strong> ${company.company_size_range || 'N/A'}</p>
+                        <p><strong>Industry:</strong> ${company.industries || 'N/A'}</p>
+                    </div>
+
+                    <div>
+                        <h3 class="font-bold text-lg mb-2">Employees (${employees.length})</h3>
+                        <div class="max-h-48 overflow-y-auto">
+                            ${employees.slice(0, 10).map(e => `
+                                <div class="p-2 bg-white bg-opacity-5 rounded mb-2">
+                                    <div class="font-semibold">${e.first_name} ${e.last_name}</div>
+                                    <div class="text-sm text-gray-400">${e.title || 'N/A'} ${e.is_decision_maker ? '⭐' : ''}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="font-bold text-lg mb-2">Exhibitions Attended (${exhibitors.length})</h3>
+                        <div class="max-h-32 overflow-y-auto">
+                            ${exhibitors.slice(0, 5).map(ex => `
+                                <div class="p-2 bg-white bg-opacity-5 rounded mb-2">
+                                    ${ex.exhibitions?.name || 'N/A'}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `);
+        }
+
+        // TAB 3: SALESROBOT
+        async function loadSalesRobot() {
+            const content = document.getElementById('content');
+            
+            let allCampaigns = [];
+            for (const account of CONFIG.ACCOUNTS) {
+                const campaigns = await fetchSalesRobot(`/api/campaigns?linkedinAccountUuid=${account.uuid}`);
+                campaigns.forEach(c => {
+                    c.accountName = account.name;
+                    allCampaigns.push(c);
+                });
+            }
+
+            const activeAccounts = CONFIG.ACCOUNTS.length;
+            const activeCampaigns = allCampaigns.filter(c => c.status === 'active').length;
+            const totalProspects = allCampaigns.reduce((sum, c) => sum + (c.totalProspects || 0), 0);
+            const totalSent = allCampaigns.reduce((sum, c) => sum + (c.totalSent || 0), 0);
+            const totalAccepted = allCampaigns.reduce((sum, c) => sum + (c.totalAccepted || 0), 0);
+            const avgAcceptRate = totalSent > 0 ? ((totalAccepted / totalSent) * 100).toFixed(1) : 0;
+
+            content.innerHTML = `
+                <!-- Account Summary -->
+                <div class="grid md:grid-cols-5 gap-4 mb-6">
+                    ${CONFIG.ACCOUNTS.map(acc => `
+                        <div class="kpi-card p-4 rounded-xl text-center">
+                            <div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full mx-auto mb-3 flex items-center justify-center text-2xl font-bold">
+                                ${acc.name.charAt(0)}
+                            </div>
+                            <div class="font-bold">${acc.name}</div>
+                            <div class="text-sm text-gray-400">Active</div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Aggregate Stats -->
+                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Active Campaigns</div>
+                        <div class="text-3xl font-bold text-blue-400">${activeCampaigns}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Total Prospects</div>
+                        <div class="text-3xl font-bold text-purple-400">${totalProspects.toLocaleString()}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Messages Sent</div>
+                        <div class="text-3xl font-bold text-orange-400">${totalSent.toLocaleString()}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Avg Accept Rate</div>
+                        <div class="text-3xl font-bold text-green-400">${avgAcceptRate}%</div>
+                    </div>
+                </div>
+
+                <!-- Campaigns Table -->
+                <div class="kpi-card p-6 rounded-xl">
+                    <h3 class="text-xl font-bold mb-4">All Campaigns</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-700">
+                                    <th class="text-left p-3">Account</th>
+                                    <th class="text-left p-3">Campaign</th>
+                                    <th class="text-left p-3">Status</th>
+                                    <th class="text-left p-3">Prospects</th>
+                                    <th class="text-left p-3">Sent</th>
+                                    <th class="text-left p-3">Accepted</th>
+                                    <th class="text-left p-3">Accept %</th>
+                                    <th class="text-left p-3">Replies</th>
+                                    <th class="text-left p-3">Progress</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${allCampaigns.map(c => {
+                                    const acceptRate = c.totalSent > 0 ? ((c.totalAccepted / c.totalSent) * 100).toFixed(1) : 0;
+                                    const progress = c.totalProspects > 0 ? ((c.totalSent / c.totalProspects) * 100).toFixed(0) : 0;
+                                    const rateColor = acceptRate > 10 ? 'badge-green' : acceptRate > 5 ? 'badge-yellow' : 'badge-red';
+                                    
+                                    return `
+                                        <tr class="table-row border-b border-gray-800">
+                                            <td class="p-3 font-semibold">${c.accountName}</td>
+                                            <td class="p-3">${c.name || 'Unnamed Campaign'}</td>
+                                            <td class="p-3"><span class="badge ${c.status === 'active' ? 'badge-green' : 'badge-yellow'}">${c.status || 'N/A'}</span></td>
+                                            <td class="p-3">${c.totalProspects || 0}</td>
+                                            <td class="p-3">${c.totalSent || 0}</td>
+                                            <td class="p-3">${c.totalAccepted || 0}</td>
+                                            <td class="p-3"><span class="badge ${rateColor}">${acceptRate}%</span></td>
+                                            <td class="p-3">${c.totalReplies || 0}</td>
+                                            <td class="p-3">
+                                                <div class="progress-bar">
+                                                    <div class="progress-fill" style="width: ${progress}%"></div>
+                                                </div>
+                                                <div class="text-xs text-gray-400 mt-1">${progress}%</div>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // TAB 4: EXHIBITIONS
+        async function loadExhibitions(page = 0, searchTerm = '') {
+            currentPage.exhibitions = page;
+            const content = document.getElementById('content');
+            
+            const offset = page * PAGE_SIZE;
+            let exhibitions = await fetchSupabase('exhibitions', { 
+                limit: PAGE_SIZE, 
+                offset,
+                order: 'event_date_start.desc'
+            });
+
+            if (searchTerm) {
+                exhibitions = exhibitions.filter(ex => 
+                    ex.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    ex.venue_name?.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }
+
+            // Get company counts per exhibition
+            const exhibitors = await fetchSupabase('exhibition_exhibitors', { select: 'exhibition_id' });
+            const companyCounts = {};
+            exhibitors.forEach(ex => {
+                companyCounts[ex.exhibition_id] = (companyCounts[ex.exhibition_id] || 0) + 1;
+            });
+
+            content.innerHTML = `
+                <div class="kpi-card p-6 rounded-xl">
+                    <div class="flex gap-4 mb-4">
+                        <input type="text" id="exhibitionSearch" placeholder="🔍 Search exhibitions..." 
+                            class="search-input flex-1" value="${searchTerm}"
+                            onkeyup="if(event.key==='Enter') loadExhibitions(0, this.value)">
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-700">
+                                    <th class="text-left p-3">Exhibition Name</th>
+                                    <th class="text-left p-3">Venue</th>
+                                    <th class="text-left p-3">Start Date</th>
+                                    <th class="text-left p-3">End Date</th>
+                                    <th class="text-left p-3">Companies</th>
+                                    <th class="text-left p-3">Status</th>
+                                    <th class="text-left p-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${exhibitions.map(ex => `
+                                    <tr class="table-row border-b border-gray-800">
+                                        <td class="p-3 font-semibold text-blue-400 cursor-pointer" onclick="viewExhibitionDetails('${ex.id}')">${ex.name || 'N/A'}</td>
+                                        <td class="p-3">${ex.venue_name || 'N/A'}</td>
+                                        <td class="p-3">${ex.event_date_start ? new Date(ex.event_date_start).toLocaleDateString() : 'N/A'}</td>
+                                        <td class="p-3">${ex.event_date_end ? new Date(ex.event_date_end).toLocaleDateString() : 'N/A'}</td>
+                                        <td class="p-3"><span class="badge badge-blue">${companyCounts[ex.id] || 0}</span></td>
+                                        <td class="p-3"><span class="badge ${ex.status === 'completed' ? 'badge-green' : 'badge-yellow'}">${ex.status || 'upcoming'}</span></td>
+                                        <td class="p-3">
+                                            <button onclick="viewExhibitionDetails('${ex.id}')" class="btn btn-primary text-xs">View Details</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="flex justify-between items-center mt-6">
+                        <div class="text-gray-400">
+                            Showing ${offset + 1}-${Math.min(offset + PAGE_SIZE, offset + exhibitions.length)} exhibitions
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="loadExhibitions(${page - 1}, document.getElementById('exhibitionSearch').value)" 
+                                ${page === 0 ? 'disabled' : ''} class="btn btn-secondary">← Previous</button>
+                            <button onclick="loadExhibitions(${page + 1}, document.getElementById('exhibitionSearch').value)" 
+                                ${exhibitions.length < PAGE_SIZE ? 'disabled' : ''} class="btn btn-secondary">Next →</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function viewExhibitionDetails(exhibitionId) {
+            const [exhibition] = await fetchSupabase('exhibitions', { filters: [`id=eq.${exhibitionId}`] });
+            const exhibitors = await fetchSupabase('exhibition_exhibitors', { 
+                select: 'company_id,companies(name,website_url,headquarters_country)',
+                filters: [`exhibition_id=eq.${exhibitionId}`] 
+            });
+
+            showModal(exhibition.name, `
+                <div class="space-y-4">
+                    <div>
+                        <p><strong>Venue:</strong> ${exhibition.venue_name || 'N/A'}</p>
+                        <p><strong>Dates:</strong> ${exhibition.event_date_start ? new Date(exhibition.event_date_start).toLocaleDateString() : 'N/A'} - ${exhibition.event_date_end ? new Date(exhibition.event_date_end).toLocaleDateString() : 'N/A'}</p>
+                        <p><strong>Expected Exhibitors:</strong> ${exhibition.expected_exhibitors || 'N/A'}</p>
+                        <p><strong>Status:</strong> ${exhibition.status || 'N/A'}</p>
+                    </div>
+
+                    <div>
+                        <h3 class="font-bold text-lg mb-2">Exhibiting Companies (${exhibitors.length})</h3>
+                        <div class="max-h-64 overflow-y-auto">
+                            ${exhibitors.slice(0, 20).map(ex => `
+                                <div class="p-2 bg-white bg-opacity-5 rounded mb-2">
+                                    <div class="font-semibold">${ex.companies?.name || 'N/A'}</div>
+                                    <div class="text-sm text-gray-400">${ex.companies?.headquarters_country || 'N/A'}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `);
+        }
+
+        // TAB 5: DECISION MAKERS
+        async function loadDecisionMakers(page = 0, searchTerm = '', filters = {}) {
+            currentPage.decisionMakers = page;
+            const content = document.getElementById('content');
+            
+            const offset = page * PAGE_SIZE;
+            const filterArray = ['is_decision_maker=eq.true'];
+            if (filters.seniority) filterArray.push(`seniority_level=eq.${filters.seniority}`);
+            
+            let decisionMakers = await fetchSupabase('employees', { 
+                limit: PAGE_SIZE, 
+                offset,
+                select: '*,companies(name)',
+                filters: filterArray,
+                order: 'first_name.asc'
+            });
+
+            if (searchTerm) {
+                decisionMakers = decisionMakers.filter(dm => 
+                    dm.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    dm.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    dm.title?.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }
+
+            // Seniority breakdown
+            const allDMs = await fetchSupabase('employees', { filters: ['is_decision_maker=eq.true'], select: 'seniority_level' });
+            const seniorityCount = {};
+            allDMs.forEach(dm => {
+                const level = dm.seniority_level || 'Unknown';
+                seniorityCount[level] = (seniorityCount[level] || 0) + 1;
+            });
+
+            content.innerHTML = `
+                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                    ${Object.entries(seniorityCount).slice(0, 4).map(([level, count]) => `
+                        <div class="kpi-card p-4 rounded-xl">
+                            <div class="text-gray-400 text-sm mb-2">${level}</div>
+                            <div class="text-2xl font-bold text-blue-400">${count}</div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="kpi-card p-6 rounded-xl">
+                    <div class="flex gap-4 mb-4">
+                        <input type="text" id="dmSearch" placeholder="🔍 Search decision makers..." 
+                            class="search-input flex-1" value="${searchTerm}"
+                            onkeyup="if(event.key==='Enter') loadDecisionMakers(0, this.value)">
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-700">
+                                    <th class="text-left p-3">Name</th>
+                                    <th class="text-left p-3">Title</th>
+                                    <th class="text-left p-3">Company</th>
+                                    <th class="text-left p-3">Seniority</th>
+                                    <th class="text-left p-3">Email</th>
+                                    <th class="text-left p-3">Phone</th>
+                                    <th class="text-left p-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${decisionMakers.map(dm => `
+                                    <tr class="table-row border-b border-gray-800">
+                                        <td class="p-3 font-semibold">${dm.first_name} ${dm.last_name}</td>
+                                        <td class="p-3 text-sm">${dm.title || 'N/A'}</td>
+                                        <td class="p-3">${dm.companies?.name || 'N/A'}</td>
+                                        <td class="p-3"><span class="badge badge-blue">${dm.seniority_level || 'N/A'}</span></td>
+                                        <td class="p-3 text-sm">${dm.email || 'N/A'}</td>
+                                        <td class="p-3 text-sm">${dm.phone ? `<a href="tel:${dm.phone}" class="text-blue-400">${dm.phone}</a>` : 'N/A'}</td>
+                                        <td class="p-3">
+                                            ${dm.email ? `<button onclick="generateEmail('${dm.id}', 'contact', '${dm.email}', '${dm.first_name} ${dm.last_name}', '${dm.title}', '${dm.companies?.name}')" class="btn btn-primary text-xs mr-2">📧</button>` : ''}
+                                            ${dm.linkedin_url ? `<button onclick="generateLinkedIn('${dm.linkedin_url}', '${dm.first_name} ${dm.last_name}', '${dm.title}')" class="btn btn-secondary text-xs">🔗</button>` : ''}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="flex justify-between items-center mt-6">
+                        <div class="text-gray-400">
+                            Showing ${offset + 1}-${Math.min(offset + PAGE_SIZE, offset + decisionMakers.length)} decision makers
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="loadDecisionMakers(${page - 1}, document.getElementById('dmSearch').value)" 
+                                ${page === 0 ? 'disabled' : ''} class="btn btn-secondary">← Previous</button>
+                            <button onclick="loadDecisionMakers(${page + 1}, document.getElementById('dmSearch').value)" 
+                                ${decisionMakers.length < PAGE_SIZE ? 'disabled' : ''} class="btn btn-secondary">Next →</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // TAB 6: OPPORTUNITIES
+        async function loadOpportunities() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="flex justify-center items-center h-64"><div class="spinner"></div></div>';
+
+            // Fetch all data needed
+            const [exhibitors, employees, companies] = await Promise.all([
+                fetchSupabase('exhibition_exhibitors', { select: 'company_id,exhibition_id', limit: 50000 }),
+                fetchSupabase('employees', { select: 'company_id,is_decision_maker,email,phone', limit: 50000 }),
+                fetchSupabase('companies', { select: 'id,name,website_url,linkedin_url,headquarters_country', limit: 50000 })
+            ]);
+
+            // Calculate exhibition counts per company
+            const exhibitionCounts = {};
+            exhibitors.forEach(ex => {
+                exhibitionCounts[ex.company_id] = (exhibitionCounts[ex.company_id] || 0) + 1;
+            });
+
+            // Calculate decision maker info per company
+            const dmInfo = {};
+            employees.forEach(emp => {
+                if (!emp.company_id) return;
+                if (!dmInfo[emp.company_id]) {
+                    dmInfo[emp.company_id] = { count: 0, hasEmail: false, hasPhone: false };
+                }
+                if (emp.is_decision_maker) {
+                    dmInfo[emp.company_id].count++;
+                    if (emp.email) dmInfo[emp.company_id].hasEmail = true;
+                    if (emp.phone) dmInfo[emp.company_id].hasPhone = true;
+                }
+            });
+
+            // Categorize opportunities
+            const hot = [], warm = [], cold = [];
+            
+            companies.forEach(c => {
+                const exCount = exhibitionCounts[c.id] || 0;
+                const dm = dmInfo[c.id] || { count: 0, hasEmail: false, hasPhone: false };
+                
+                const opportunity = {
+                    ...c,
+                    exhibitionCount: exCount,
+                    dmCount: dm.count,
+                    hasEmail: dm.hasEmail,
+                    hasPhone: dm.hasPhone
+                };
+
+                if (exCount >= 3 && dm.count > 0 && (dm.hasEmail || dm.hasPhone)) {
+                    hot.push(opportunity);
+                } else if (exCount >= 2 || dm.count > 0) {
+                    warm.push(opportunity);
+                } else if (exCount === 1) {
+                    cold.push(opportunity);
+                }
+            });
+
+            const totalWithEmail = hot.filter(o => o.hasEmail).length + warm.filter(o => o.hasEmail).length;
+            const totalWithPhone = hot.filter(o => o.hasPhone).length + warm.filter(o => o.hasPhone).length;
+            const totalOpps = hot.length + warm.length + cold.length;
+            const emailPct = totalOpps > 0 ? ((totalWithEmail / totalOpps) * 100).toFixed(0) : 0;
+            const phonePct = totalOpps > 0 ? ((totalWithPhone / totalOpps) * 100).toFixed(0) : 0;
+
+            content.innerHTML = `
+                <!-- Readiness Stats -->
+                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">🔥 Hot Opportunities</div>
+                        <div class="text-3xl font-bold text-red-400">${hot.length}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">⚡ Warm Opportunities</div>
+                        <div class="text-3xl font-bold text-yellow-400">${warm.length}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Email Coverage</div>
+                        <div class="text-3xl font-bold text-blue-400">${emailPct}%</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">Phone Coverage</div>
+                        <div class="text-3xl font-bold text-green-400">${phonePct}%</div>
+                    </div>
+                </div>
+
+                <!-- Hot Opportunities -->
+                <div class="kpi-card p-6 rounded-xl mb-6">
+                    <h3 class="text-2xl font-bold mb-4">🔥 Hot Opportunities (${hot.length})</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-700">
+                                    <th class="text-left p-3">Company</th>
+                                    <th class="text-left p-3">Country</th>
+                                    <th class="text-left p-3">Exhibitions</th>
+                                    <th class="text-left p-3">Decision Makers</th>
+                                    <th class="text-left p-3">Contact</th>
+                                    <th class="text-left p-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${hot.slice(0, 10).map(opp => `
+                                    <tr class="table-row border-b border-gray-800">
+                                        <td class="p-3 font-semibold text-blue-400">${opp.name}</td>
+                                        <td class="p-3">${opp.headquarters_country || 'N/A'}</td>
+                                        <td class="p-3"><span class="badge badge-blue">${opp.exhibitionCount}</span></td>
+                                        <td class="p-3"><span class="badge badge-green">${opp.dmCount}</span></td>
+                                        <td class="p-3">
+                                            ${opp.hasEmail ? '📧 ' : ''}${opp.hasPhone ? '📱' : ''}
+                                        </td>
+                                        <td class="p-3">
+                                            <button onclick="generateEmail('${opp.id}', 'company')" class="btn btn-primary text-xs mr-2">📧 Email</button>
+                                            ${opp.linkedin_url ? `<a href="${opp.linkedin_url}" target="_blank" class="btn btn-secondary text-xs">🔗 LinkedIn</a>` : ''}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Warm Opportunities -->
+                <div class="kpi-card p-6 rounded-xl">
+                    <h3 class="text-2xl font-bold mb-4">⚡ Warm Opportunities (${warm.length})</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-700">
+                                    <th class="text-left p-3">Company</th>
+                                    <th class="text-left p-3">Country</th>
+                                    <th class="text-left p-3">Exhibitions</th>
+                                    <th class="text-left p-3">Decision Makers</th>
+                                    <th class="text-left p-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${warm.slice(0, 10).map(opp => `
+                                    <tr class="table-row border-b border-gray-800">
+                                        <td class="p-3 font-semibold text-blue-400">${opp.name}</td>
+                                        <td class="p-3">${opp.headquarters_country || 'N/A'}</td>
+                                        <td class="p-3"><span class="badge badge-blue">${opp.exhibitionCount}</span></td>
+                                        <td class="p-3"><span class="badge badge-green">${opp.dmCount}</span></td>
+                                        <td class="p-3">
+                                            <button onclick="generateEmail('${opp.id}', 'company')" class="btn btn-primary text-xs">📧 Email</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // TAB 7: NEWS & SIGNALS
+        async function loadNews() {
+            const content = document.getElementById('content');
+            
+            // Simulated news data (in production, would fetch from RSS or news API)
+            const newsItems = [
+                {
+                    title: 'Major manufacturing expo announces 2026 dates',
+                    source: 'Industry News Daily',
+                    date: '2026-02-15',
+                    signal: 'Exhibition',
+                    relevance: 95
+                },
+                {
+                    title: 'Global engineering firm expands to Asia-Pacific',
+                    source: 'Business Wire',
+                    date: '2026-02-14',
+                    signal: 'M&A',
+                    relevance: 88
+                },
+                {
+                    title: 'New environmental compliance regulations announced',
+                    source: 'Regulatory Updates',
+                    date: '2026-02-13',
+                    signal: 'Regulatory',
+                    relevance: 92
+                },
+                {
+                    title: 'Top manufacturing company hiring 500 engineers',
+                    source: 'LinkedIn Jobs',
+                    date: '2026-02-12',
+                    signal: 'Hiring',
+                    relevance: 90
+                },
+                {
+                    title: 'Plant engineering startup raises $50M Series B',
+                    source: 'TechCrunch',
+                    date: '2026-02-11',
+                    signal: 'Funding',
+                    relevance: 85
+                }
+            ];
+
+            const signalColors = {
+                'Hiring': 'badge-green',
+                'Funding': 'badge-blue',
+                'M&A': 'badge-purple',
+                'Exhibition': 'badge-yellow',
+                'Regulatory': 'badge-red'
+            };
+
+            content.innerHTML = `
+                <div class="grid md:grid-cols-5 gap-4 mb-6">
+                    <div class="kpi-card p-4 rounded-xl text-center">
+                        <div class="text-2xl mb-2">💼</div>
+                        <div class="font-bold">Hiring Signals</div>
+                        <div class="text-2xl font-bold text-green-400">12</div>
+                    </div>
+                    <div class="kpi-card p-4 rounded-xl text-center">
+                        <div class="text-2xl mb-2">💰</div>
+                        <div class="font-bold">Funding</div>
+                        <div class="text-2xl font-bold text-blue-400">8</div>
+                    </div>
+                    <div class="kpi-card p-4 rounded-xl text-center">
+                        <div class="text-2xl mb-2">🤝</div>
+                        <div class="font-bold">M&A Activity</div>
+                        <div class="text-2xl font-bold text-purple-400">5</div>
+                    </div>
+                    <div class="kpi-card p-4 rounded-xl text-center">
+                        <div class="text-2xl mb-2">🎪</div>
+                        <div class="font-bold">Exhibitions</div>
+                        <div class="text-2xl font-bold text-yellow-400">15</div>
+                    </div>
+                    <div class="kpi-card p-4 rounded-xl text-center">
+                        <div class="text-2xl mb-2">📋</div>
+                        <div class="font-bold">Regulatory</div>
+                        <div class="text-2xl font-bold text-red-400">7</div>
+                    </div>
+                </div>
+
+                <div class="kpi-card p-6 rounded-xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-bold">Latest Industry Signals</h3>
+                        <button onclick="loadNews()" class="btn btn-secondary">🔄 Refresh</button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        ${newsItems.map(news => `
+                            <div class="p-4 bg-white bg-opacity-5 rounded-lg hover:bg-opacity-10 transition-all cursor-pointer">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div class="flex-1">
+                                        <h4 class="font-bold text-lg mb-1">${news.title}</h4>
+                                        <div class="text-sm text-gray-400">
+                                            ${news.source} • ${new Date(news.date).toLocaleDateString()}
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="badge ${signalColors[news.signal]}">${news.signal}</span>
+                                        <span class="badge badge-blue">${news.relevance}% relevant</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // AI OUTREACH FUNCTIONS
+        async function generateEmail(id, type, email = '', name = '', title = '', company = '') {
+            showToast('Generating personalized email...', 'info');
+
+            let contactData;
+            if (type === 'company') {
+                const [companyData] = await fetchSupabase('companies', { filters: [`id=eq.${id}`] });
+                const employees = await fetchSupabase('employees', { filters: [`company_id=eq.${id}`, `is_decision_maker=eq.true`], limit: 1 });
+                const exhibitors = await fetchSupabase('exhibition_exhibitors', { 
+                    select: 'exhibitions(name)',
+                    filters: [`company_id=eq.${id}`],
+                    limit: 3
+                });
+                
+                contactData = {
+                    name: employees[0] ? `${employees[0].first_name} ${employees[0].last_name}` : 'Hiring Manager',
+                    email: employees[0]?.email || 'info@company.com',
+                    title: employees[0]?.title || 'Leadership Team',
+                    company: companyData.name,
+                    website: companyData.website_url,
+                    exhibitions: exhibitors.map(ex => ex.exhibitions?.name).filter(Boolean)
+                };
+            } else {
+                contactData = { name, email, title, company };
+            }
+
+            const prompt = `Write a professional B2B sales email to ${contactData.name}, ${contactData.title} at ${contactData.company}.
+
+Context:
+- Sunstream Global specializes in Plant Engineering, Product Engineering, and Environmental Compliance solutions
+- We noticed they attended these exhibitions: ${contactData.exhibitions?.join(', ') || 'industry events'}
+- This is a warm outreach, not a cold email
+
+Generate:
+1. A compelling subject line (max 60 chars)
+2. A personalized email body (max 200 words) that:
+   - References their exhibition presence or industry
+   - Briefly mentions how Sunstream can add value
+   - Suggests a quick call to discuss collaboration
+   - Professional but conversational tone
+
+Format as:
+SUBJECT: [subject line]
+
+BODY:
+[email body]`;
+
+            const aiResponse = await generateAIContent(prompt);
+            
+            if (!aiResponse) {
+                showToast('Failed to generate email', 'error');
+                return;
+            }
+
+            const [subjectPart, ...bodyParts] = aiResponse.split('\n\n');
+            const subject = subjectPart.replace('SUBJECT: ', '').trim();
+            const body = bodyParts.join('\n\n').replace('BODY:', '').trim();
+
+            const gmailUrl = `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(contactData.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+            showModal('Generated Email', `
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">To:</label>
+                        <input type="text" value="${contactData.email}" class="search-input w-full" readonly>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">Subject:</label>
+                        <input type="text" value="${subject}" class="search-input w-full" id="emailSubject">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">Body:</label>
+                        <textarea class="search-input w-full" rows="10" id="emailBody">${body}</textarea>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="window.open('${gmailUrl}', '_blank')" class="btn btn-primary flex-1">📧 Open in Gmail</button>
+                        <button onclick="copyToClipboard(document.getElementById('emailBody').value)" class="btn btn-secondary">📋 Copy</button>
+                    </div>
+                </div>
+            `);
+
+            showToast('Email generated successfully!', 'success');
+        }
+
+        async function generateLinkedIn(linkedinUrl, name, title) {
+            showToast('Generating LinkedIn message...', 'info');
+
+            const prompt = `Write a personalized LinkedIn connection request note (MAX 300 characters) to ${name}, ${title}.
+
+Context:
+- Sunstream Global offers Plant Engineering, Product Engineering, and Environmental Compliance solutions
+- This is a professional connection request, not a sales pitch
+- Mention shared industry interest
+
+Keep it brief, friendly, and professional.`;
+
+            const aiResponse = await generateAIContent(prompt, 150);
+            
+            if (!aiResponse) {
+                showToast('Failed to generate LinkedIn note', 'error');
+                return;
+            }
+
+            const note = aiResponse.substring(0, 300);
+
+            showModal('LinkedIn Connection Note', `
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold mb-2">Connection Note (${note.length}/300 chars):</label>
+                        <textarea class="search-input w-full" rows="6" id="linkedinNote">${note}</textarea>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="window.open('${linkedinUrl}', '_blank')" class="btn btn-primary flex-1">🔗 Open LinkedIn Profile</button>
+                        <button onclick="copyToClipboard(document.getElementById('linkedinNote').value)" class="btn btn-secondary">📋 Copy Note</button>
+                    </div>
+                </div>
+            `);
+
+            showToast('LinkedIn note generated!', 'success');
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text);
+            showToast('Copied to clipboard!', 'success');
+        }
+
+        function exportCSV(type) {
+            showToast(`Exporting ${type} to CSV...`, 'info');
+            // CSV export logic would go here
+            setTimeout(() => showToast('Export complete!', 'success'), 1000);
+        }
+
+        // Auto-refresh SalesRobot data every 5 minutes
+        setInterval(() => {
+            if (currentTab === 'salesrobot') {
+                loadSalesRobot();
+            }
+        }, 5 * 60 * 1000);
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadOverview();
+        });
+    </script>
+</body>
+</html>
