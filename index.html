@@ -259,12 +259,12 @@
         // API Functions
         async function fetchSupabase(table, options = {}) {
             if (!CONFIG.SUPABASE_URL) {
-                console.error('CONFIG not loaded yet. Retrying in 1s...');
-                await new Promise(r => setTimeout(r, 1000));
+                console.error('CONFIG not loaded yet. Retrying in 2s...');
+                await new Promise(r => setTimeout(r, 2000));
                 if (window.SSD_CONFIG) Object.assign(CONFIG, window.SSD_CONFIG);
                 if (!CONFIG.SUPABASE_URL) { showToast('Config not loaded. Refresh the page.', 'error'); return []; }
             }
-            const { limit = 1000, offset = 0, select = '*', filters = [], order } = options;
+            const { limit = 1000, offset = 0, select = '*', filters = [], order, count = false } = options;
             let url = `${CONFIG.SUPABASE_URL}/rest/v1/${table}?select=${select}`;
             
             if (limit) url += `&limit=${limit}`;
@@ -272,16 +272,23 @@
             if (order) url += `&order=${order}`;
             filters.forEach(f => url += `&${f}`);
 
+            const headers = {
+                'apikey': CONFIG.SUPABASE_KEY,
+                'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`
+            };
+            if (count) headers['Prefer'] = 'count=exact';
+
             try {
-                const response = await fetch(url, {
-                    headers: {
-                        'apikey': CONFIG.SUPABASE_KEY,
-                        'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`
-                    }
-                });
-                if (!response.ok) { console.error('Supabase error:', response.status, await response.text()); return []; }
-                return await response.json();
-            } catch(e) { console.error('Fetch error for', table, e); showToast(`Failed to load ${table}`, 'error'); return []; }
+                const response = await fetch(url, { headers });
+                if (!response.ok) { console.error('Supabase error:', response.status, await response.text()); return count ? { data: [], count: 0 } : []; }
+                const data = await response.json();
+                if (count) {
+                    const range = response.headers.get('content-range');
+                    const total = range ? parseInt(range.split('/')[1]) : data.length;
+                    return { data, count: total };
+                }
+                return data;
+            } catch(e) { console.error('Fetch error for', table, e); showToast(`Failed to load ${table}`, 'error'); return count ? { data: [], count: 0 } : []; }
         }
 
         async function fetchSalesRobot(endpoint) {
@@ -357,15 +364,20 @@
         async function loadOverview() {
             const content = document.getElementById('content');
             
-            // Fetch data
-            const [companies, employees, exhibitions, exhibitors] = await Promise.all([
-                fetchSupabase('companies', { limit: 50000 }),
-                fetchSupabase('employees', { limit: 50000 }),
-                fetchSupabase('exhibitions'),
-                fetchSupabase('exhibition_exhibitors')
+            // Fetch counts efficiently using Supabase count headers (no need to download all rows)
+            const [companiesResult, employeesResult, dmResult, exhibitionsResult, exhibitorsResult] = await Promise.all([
+                fetchSupabase('companies', { select: 'id', limit: 1, count: true }),
+                fetchSupabase('employees', { select: 'id', limit: 1, count: true }),
+                fetchSupabase('employees', { select: 'id', limit: 1, count: true, filters: ['is_decision_maker=eq.true'] }),
+                fetchSupabase('exhibitions', { select: 'id', limit: 1, count: true }),
+                fetchSupabase('exhibition_exhibitors', { select: 'id', limit: 1, count: true })
             ]);
 
-            const decisionMakers = employees.filter(e => e.is_decision_maker);
+            const companies = { length: companiesResult.count || 0 };
+            const employees = { length: employeesResult.count || 0 };
+            const decisionMakers = { length: dmResult.count || 0 };
+            const exhibitions = { length: exhibitionsResult.count || 0 };
+            const exhibitors = { length: exhibitorsResult.count || 0 };
             
             // Use cached SalesRobot data (pre-fetched on page load)
             let totalProspects = 0, totalSent = 0, totalAccepted = 0, totalReplies = 0;
@@ -432,7 +444,7 @@
                             <div class="w-2 h-2 bg-green-400 rounded-full"></div>
                             <div class="flex-1">
                                 <div class="font-semibold">New decision maker identified</div>
-                                <div class="text-sm text-gray-400">VP Engineering at ${companies[0]?.name || 'Company'}</div>
+                                <div class="text-sm text-gray-400">VP Engineering at Sunstream prospect</div>
                             </div>
                             <div class="text-sm text-gray-400">2 min ago</div>
                         </div>
@@ -492,36 +504,32 @@
             const filterArray = [];
             if (filters.country) filterArray.push(`headquarters_country=eq.${filters.country}`);
             if (filters.status) filterArray.push(`engagement_status=eq.${filters.status}`);
+            if (searchTerm) filterArray.push(`name=ilike.*${searchTerm}*`);
             
-            let companies = await fetchSupabase('companies', { 
+            const result = await fetchSupabase('companies', { 
                 limit: PAGE_SIZE, 
                 offset, 
                 order: 'name.asc',
-                filters: filterArray 
+                filters: filterArray,
+                count: true
             });
 
-            if (searchTerm) {
-                companies = companies.filter(c => 
-                    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    c.headquarters_country?.toLowerCase().includes(searchTerm.toLowerCase())
-                );
+            const companies = result.data || result;
+            const totalCompanies = result.count || companies.length;
+
+            // Get exhibition + DM counts only for the visible companies (not all 24K)
+            const companyIds = companies.map(c => c.id);
+            let exhibitionCounts = {};
+            let dmCounts = {};
+            if (companyIds.length > 0) {
+                const idList = companyIds.map(id => `"${id}"`).join(',');
+                const [exhibitors, employees] = await Promise.all([
+                    fetchSupabase('exhibition_exhibitors', { select: 'company_id', filters: [`company_id=in.(${idList})`], limit: 5000 }),
+                    fetchSupabase('employees', { select: 'company_id,is_decision_maker', filters: [`company_id=in.(${idList})`, 'is_decision_maker=eq.true'], limit: 5000 })
+                ]);
+                exhibitors.forEach(ex => { exhibitionCounts[ex.company_id] = (exhibitionCounts[ex.company_id] || 0) + 1; });
+                employees.forEach(emp => { dmCounts[emp.company_id] = (dmCounts[emp.company_id] || 0) + 1; });
             }
-
-            // Get exhibition counts
-            const exhibitors = await fetchSupabase('exhibition_exhibitors', { select: 'company_id' });
-            const exhibitionCounts = {};
-            exhibitors.forEach(ex => {
-                exhibitionCounts[ex.company_id] = (exhibitionCounts[ex.company_id] || 0) + 1;
-            });
-
-            // Get decision maker counts
-            const employees = await fetchSupabase('employees', { select: 'company_id,is_decision_maker' });
-            const dmCounts = {};
-            employees.forEach(emp => {
-                if (emp.is_decision_maker && emp.company_id) {
-                    dmCounts[emp.company_id] = (dmCounts[emp.company_id] || 0) + 1;
-                }
-            });
 
             content.innerHTML = `
                 <div class="kpi-card p-6 rounded-xl mb-6">
@@ -552,7 +560,7 @@
                                         <td class="p-3 font-semibold text-blue-400">${c.name || 'N/A'}</td>
                                         <td class="p-3">${c.headquarters_country || 'N/A'}</td>
                                         <td class="p-3">${c.company_size_range || 'N/A'}</td>
-                                        <td class="p-3 text-sm">${(c.industries || 'N/A').substring(0, 30)}...</td>
+                                        <td class="p-3 text-sm">${Array.isArray(c.industries) ? c.industries.slice(0,2).join(', ') : (c.industries || 'N/A')}</td>
                                         <td class="p-3"><span class="badge badge-blue">${exhibitionCounts[c.id] || 0}</span></td>
                                         <td class="p-3"><span class="badge badge-green">${dmCounts[c.id] || 0}</span></td>
                                         <td class="p-3"><span class="badge ${c.engagement_status === 'contacted' ? 'badge-yellow' : 'badge-blue'}">${c.engagement_status || 'new'}</span></td>
@@ -569,13 +577,14 @@
                     <!-- Pagination -->
                     <div class="flex justify-between items-center mt-6">
                         <div class="text-gray-400">
-                            Showing ${offset + 1}-${Math.min(offset + PAGE_SIZE, offset + companies.length)} companies
+                            Showing ${offset + 1}-${Math.min(offset + PAGE_SIZE, totalCompanies)} of ${totalCompanies.toLocaleString()} companies
                         </div>
                         <div class="flex space-x-2">
                             <button onclick="loadCompanies(${page - 1}, document.getElementById('companySearch').value)" 
                                 ${page === 0 ? 'disabled' : ''} class="btn btn-secondary">← Previous</button>
+                            <span class="px-3 py-2 text-gray-400">Page ${page + 1} of ${Math.ceil(totalCompanies / PAGE_SIZE)}</span>
                             <button onclick="loadCompanies(${page + 1}, document.getElementById('companySearch').value)" 
-                                ${companies.length < PAGE_SIZE ? 'disabled' : ''} class="btn btn-secondary">Next →</button>
+                                ${offset + PAGE_SIZE >= totalCompanies ? 'disabled' : ''} class="btn btn-secondary">Next →</button>
                         </div>
                     </div>
                 </div>
