@@ -214,6 +214,25 @@
         let currentPage = { companies: 0, exhibitions: 0, decisionMakers: 0, opportunities: 0 };
         const PAGE_SIZE = 25;
 
+        // SalesRobot cache - pre-fetched on load, always ready
+        let salesRobotCache = { campaigns: [], lastFetched: null, loading: false };
+
+        async function prefetchSalesRobot() {
+            if (salesRobotCache.loading) return;
+            salesRobotCache.loading = true;
+            try {
+                let allCampaigns = [];
+                for (const account of (CONFIG.ACCOUNTS || [])) {
+                    const campaigns = await fetchSalesRobot(`/api/campaigns?linkedinAccountUuid=${account.uuid}`);
+                    campaigns.forEach(c => { c.accountName = account.name; allCampaigns.push(c); });
+                }
+                salesRobotCache.campaigns = allCampaigns;
+                salesRobotCache.lastFetched = new Date();
+                console.log('SalesRobot data cached:', allCampaigns.length, 'campaigns');
+            } catch(e) { console.error('SalesRobot prefetch error:', e); }
+            salesRobotCache.loading = false;
+        }
+
         // Utility Functions
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
@@ -335,17 +354,14 @@
 
             const decisionMakers = employees.filter(e => e.is_decision_maker);
             
-            // Fetch SalesRobot data
+            // Use cached SalesRobot data (pre-fetched on page load)
             let totalProspects = 0, totalSent = 0, totalAccepted = 0, totalReplies = 0;
-            for (const account of CONFIG.ACCOUNTS) {
-                const campaigns = await fetchSalesRobot(`/api/campaigns?linkedinAccountUuid=${account.uuid}`);
-                campaigns.forEach(c => {
-                    totalProspects += c.totalProspects || 0;
-                    totalSent += c.totalSent || 0;
-                    totalAccepted += c.totalAccepted || 0;
-                    totalReplies += c.totalReplies || 0;
-                });
-            }
+            salesRobotCache.campaigns.forEach(c => {
+                totalProspects += c.totalProspects || 0;
+                totalSent += c.totalSent || 0;
+                totalAccepted += c.totalAccepted || 0;
+                totalReplies += c.totalReplies || 0;
+            });
 
             const acceptRate = totalSent > 0 ? ((totalAccepted / totalSent) * 100).toFixed(1) : 0;
             const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : 0;
@@ -598,17 +614,26 @@
         }
 
         // TAB 3: SALESROBOT
-        async function loadSalesRobot() {
+        async function loadSalesRobot(forceRefresh = false) {
             const content = document.getElementById('content');
             
-            let allCampaigns = [];
-            for (const account of CONFIG.ACCOUNTS) {
-                const campaigns = await fetchSalesRobot(`/api/campaigns?linkedinAccountUuid=${account.uuid}`);
-                campaigns.forEach(c => {
-                    c.accountName = account.name;
-                    allCampaigns.push(c);
-                });
+            // Use cache if available and not forcing refresh
+            if (!forceRefresh && salesRobotCache.lastFetched && salesRobotCache.campaigns.length > 0) {
+                renderSalesRobot(salesRobotCache.campaigns);
+                return;
             }
+            
+            // Show spinner only on first load or force refresh
+            if (!salesRobotCache.lastFetched) {
+                content.innerHTML = '<div class="flex justify-center items-center h-64"><div class="spinner"></div><span class="ml-4 text-gray-400">Fetching SalesRobot campaigns...</span></div>';
+            }
+
+            await prefetchSalesRobot();
+            renderSalesRobot(salesRobotCache.campaigns);
+        }
+
+        function renderSalesRobot(allCampaigns) {
+            const content = document.getElementById('content');
 
             const activeAccounts = CONFIG.ACCOUNTS.length;
             const activeCampaigns = allCampaigns.filter(c => c.status === 'active').length;
@@ -618,6 +643,17 @@
             const avgAcceptRate = totalSent > 0 ? ((totalAccepted / totalSent) * 100).toFixed(1) : 0;
 
             content.innerHTML = `
+                <!-- Header with Refresh -->
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold">SalesRobot Campaigns</h2>
+                        <span class="text-sm text-gray-400">${salesRobotCache.lastFetched ? 'Last updated: ' + salesRobotCache.lastFetched.toLocaleTimeString() : 'Loading...'}</span>
+                    </div>
+                    <button onclick="loadSalesRobot(true)" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg font-semibold transition-all">
+                        🔄 Refresh Data
+                    </button>
+                </div>
+
                 <!-- Account Summary -->
                 <div class="grid md:grid-cols-5 gap-4 mb-6">
                     ${CONFIG.ACCOUNTS.map(acc => `
@@ -1308,8 +1344,11 @@ Keep it brief, friendly, and professional.`;
             }
         }, 5 * 60 * 1000);
 
-        // Initialize
+        // Initialize - prefetch SalesRobot immediately, then load overview
         document.addEventListener('DOMContentLoaded', () => {
+            prefetchSalesRobot().then(() => {
+                if (currentTab === 'overview') loadOverview(); // reload with SR data
+            });
             loadOverview();
         });
     </script>
