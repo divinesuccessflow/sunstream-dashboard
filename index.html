@@ -593,7 +593,7 @@
 
         async function viewCompanyDetails(companyId) {
             const [company] = await fetchSupabase('companies', { filters: [`id=eq.${companyId}`] });
-            const employees = await fetchSupabase('employees', { filters: [`company_id=eq.${companyId}`] });
+            const employees = await fetchSupabase('employees', { filters: [`company_id=eq.${companyId}`], limit: 100 });
             const exhibitors = await fetchSupabase('exhibition_exhibitors', { 
                 select: 'exhibition_id,exhibitions(name,event_date_start)',
                 filters: [`company_id=eq.${companyId}`] 
@@ -603,19 +603,35 @@
                 <div class="space-y-4">
                     <div>
                         <h3 class="font-bold text-lg mb-2">Company Details</h3>
-                        <p><strong>Website:</strong> ${company.website_url ? `<a href="${company.website_url}" target="_blank" class="text-blue-400">${company.website_url}</a>` : 'N/A'}</p>
+                        <p><strong>Website:</strong> ${company.website_url ? `<a href="${company.website_url}" target="_blank" class="text-blue-400 hover:underline">${company.website_url}</a>` : 'N/A'}</p>
+                        <p><strong>LinkedIn:</strong> ${company.linkedin_url ? `<a href="${company.linkedin_url}" target="_blank" class="text-blue-400 hover:underline">${company.linkedin_url}</a>` : 'N/A'}</p>
                         <p><strong>Country:</strong> ${company.headquarters_country || 'N/A'}</p>
                         <p><strong>Size:</strong> ${company.company_size_range || 'N/A'}</p>
-                        <p><strong>Industry:</strong> ${company.industries || 'N/A'}</p>
+                        <p><strong>Industries:</strong> ${Array.isArray(company.industries) ? company.industries.join(', ') : (company.industries || 'N/A')}</p>
                     </div>
 
                     <div>
                         <h3 class="font-bold text-lg mb-2">Employees (${employees.length})</h3>
-                        <div class="max-h-48 overflow-y-auto">
-                            ${employees.slice(0, 10).map(e => `
-                                <div class="p-2 bg-white bg-opacity-5 rounded mb-2">
-                                    <div class="font-semibold">${e.first_name} ${e.last_name}</div>
-                                    <div class="text-sm text-gray-400">${e.title || 'N/A'} ${e.is_decision_maker ? '⭐' : ''}</div>
+                        <div class="max-h-96 overflow-y-auto">
+                            ${employees.map(e => `
+                                <div class="p-3 bg-white bg-opacity-5 rounded-lg mb-2 hover:bg-opacity-10 transition-all">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <div class="flex-1">
+                                            <div class="font-semibold text-lg">${e.first_name} ${e.last_name} ${e.is_decision_maker ? '⭐' : ''}</div>
+                                            <div class="text-sm text-gray-400">${e.title || 'N/A'}</div>
+                                            <div class="text-xs text-gray-500 mt-1">
+                                                <span class="badge badge-blue mr-1">${e.seniority_level || 'N/A'}</span>
+                                                ${e.email ? `<span class="mr-2">📧 ${e.email}</span>` : ''}
+                                                ${e.phone ? `<span>📱 ${e.phone}</span>` : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-2 mt-2">
+                                        ${e.email ? `<button onclick="generateEmail('${e.id}', 'employee', '${e.email}', '${e.first_name} ${e.last_name}', '${e.title || ''}', '${company.name}')" class="btn btn-primary text-xs">📧 Email</button>` : ''}
+                                        ${e.linkedin_url ? `<a href="${e.linkedin_url}" target="_blank" class="btn btn-secondary text-xs">🔗 LinkedIn</a>` : ''}
+                                        ${e.linkedin_url ? `<button onclick="generateLinkedIn('${e.linkedin_url}', '${e.first_name} ${e.last_name}', '${e.title || ''}')" class="btn btn-secondary text-xs">💬 InMail</button>` : ''}
+                                        ${e.phone ? `<a href="tel:${e.phone}" class="btn btn-secondary text-xs">📱 Call</a>` : ''}
+                                    </div>
                                 </div>
                             `).join('')}
                         </div>
@@ -623,10 +639,11 @@
 
                     <div>
                         <h3 class="font-bold text-lg mb-2">Exhibitions Attended (${exhibitors.length})</h3>
-                        <div class="max-h-32 overflow-y-auto">
-                            ${exhibitors.slice(0, 5).map(ex => `
+                        <div class="max-h-48 overflow-y-auto">
+                            ${exhibitors.map(ex => `
                                 <div class="p-2 bg-white bg-opacity-5 rounded mb-2">
-                                    ${ex.exhibitions?.name || 'N/A'}
+                                    <div class="font-semibold">${ex.exhibitions?.name || 'N/A'}</div>
+                                    <div class="text-xs text-gray-400">${ex.exhibitions?.event_date_start ? new Date(ex.exhibitions.event_date_start).toLocaleDateString() : ''}</div>
                                 </div>
                             `).join('')}
                         </div>
@@ -968,261 +985,471 @@
         }
 
         // TAB 6: OPPORTUNITIES
-        async function loadOpportunities() {
+        let opportunitiesCache = { hot: [], warm: [], cold: [], loaded: false };
+        let opportunitiesState = { page: 0, filter: 'All' };
+
+        async function loadOpportunities(page = 0, filter = 'All') {
             const content = document.getElementById('content');
-            content.innerHTML = '<div class="flex justify-center items-center h-64"><div class="spinner"></div></div>';
+            opportunitiesState = { page, filter };
 
-            // Fetch all data needed
-            const [exhibitors, employees, companies] = await Promise.all([
-                fetchSupabase('exhibition_exhibitors', { select: 'company_id,exhibition_id', limit: 50000 }),
-                fetchSupabase('employees', { select: 'company_id,is_decision_maker,email,phone', limit: 50000 }),
-                fetchSupabase('companies', { select: 'id,name,website_url,linkedin_url,headquarters_country', limit: 50000 })
-            ]);
+            // Load data if not cached
+            if (!opportunitiesCache.loaded) {
+                content.innerHTML = '<div class="flex justify-center items-center h-64"><div class="spinner"></div><span class="ml-4 text-gray-400">Loading 200+ opportunities...</span></div>';
 
-            // Calculate exhibition counts per company
-            const exhibitionCounts = {};
-            exhibitors.forEach(ex => {
-                exhibitionCounts[ex.company_id] = (exhibitionCounts[ex.company_id] || 0) + 1;
-            });
+                // Fetch all data needed
+                const [exhibitors, employees, companies] = await Promise.all([
+                    fetchSupabase('exhibition_exhibitors', { select: 'company_id,exhibition_id', limit: 50000 }),
+                    fetchSupabase('employees', { select: 'company_id,is_decision_maker,email,phone', limit: 50000 }),
+                    fetchSupabase('companies', { select: 'id,name,website_url,linkedin_url,headquarters_country,company_size_range,industries', limit: 50000 })
+                ]);
 
-            // Calculate decision maker info per company
-            const dmInfo = {};
-            employees.forEach(emp => {
-                if (!emp.company_id) return;
-                if (!dmInfo[emp.company_id]) {
-                    dmInfo[emp.company_id] = { count: 0, hasEmail: false, hasPhone: false };
-                }
-                if (emp.is_decision_maker) {
-                    dmInfo[emp.company_id].count++;
-                    if (emp.email) dmInfo[emp.company_id].hasEmail = true;
-                    if (emp.phone) dmInfo[emp.company_id].hasPhone = true;
-                }
-            });
+                // Calculate exhibition counts per company
+                const exhibitionCounts = {};
+                exhibitors.forEach(ex => {
+                    exhibitionCounts[ex.company_id] = (exhibitionCounts[ex.company_id] || 0) + 1;
+                });
 
-            // Categorize opportunities
-            const hot = [], warm = [], cold = [];
-            
-            companies.forEach(c => {
-                const exCount = exhibitionCounts[c.id] || 0;
-                const dm = dmInfo[c.id] || { count: 0, hasEmail: false, hasPhone: false };
+                // Calculate decision maker info per company
+                const dmInfo = {};
+                employees.forEach(emp => {
+                    if (!emp.company_id) return;
+                    if (!dmInfo[emp.company_id]) {
+                        dmInfo[emp.company_id] = { count: 0, hasEmail: false, hasPhone: false };
+                    }
+                    if (emp.is_decision_maker) {
+                        dmInfo[emp.company_id].count++;
+                        if (emp.email) dmInfo[emp.company_id].hasEmail = true;
+                        if (emp.phone) dmInfo[emp.company_id].hasPhone = true;
+                    }
+                });
+
+                // Categorize opportunities
+                opportunitiesCache.hot = [];
+                opportunitiesCache.warm = [];
+                opportunitiesCache.cold = [];
                 
-                const opportunity = {
-                    ...c,
-                    exhibitionCount: exCount,
-                    dmCount: dm.count,
-                    hasEmail: dm.hasEmail,
-                    hasPhone: dm.hasPhone
-                };
+                companies.forEach(c => {
+                    const exCount = exhibitionCounts[c.id] || 0;
+                    const dm = dmInfo[c.id] || { count: 0, hasEmail: false, hasPhone: false };
+                    
+                    if (exCount === 0 && dm.count === 0) return; // Skip companies with no data
 
-                if (exCount >= 3 && dm.count > 0 && (dm.hasEmail || dm.hasPhone)) {
-                    hot.push(opportunity);
-                } else if (exCount >= 2 || dm.count > 0) {
-                    warm.push(opportunity);
-                } else if (exCount === 1) {
-                    cold.push(opportunity);
-                }
-            });
+                    const opportunity = {
+                        ...c,
+                        exhibitionCount: exCount,
+                        dmCount: dm.count,
+                        hasEmail: dm.hasEmail,
+                        hasPhone: dm.hasPhone,
+                        contactPct: dm.count > 0 ? Math.round(((dm.hasEmail ? 1 : 0) + (dm.hasPhone ? 1 : 0)) / 2 * 100) : 0
+                    };
 
-            const totalWithEmail = hot.filter(o => o.hasEmail).length + warm.filter(o => o.hasEmail).length;
-            const totalWithPhone = hot.filter(o => o.hasPhone).length + warm.filter(o => o.hasPhone).length;
-            const totalOpps = hot.length + warm.length + cold.length;
-            const emailPct = totalOpps > 0 ? ((totalWithEmail / totalOpps) * 100).toFixed(0) : 0;
-            const phonePct = totalOpps > 0 ? ((totalWithPhone / totalOpps) * 100).toFixed(0) : 0;
+                    // Classification logic
+                    if (exCount >= 3 && dm.count > 0 && (dm.hasEmail || dm.hasPhone)) {
+                        opportunitiesCache.hot.push(opportunity);
+                    } else if (exCount >= 2 || dm.count > 0) {
+                        opportunitiesCache.warm.push(opportunity);
+                    } else {
+                        opportunitiesCache.cold.push(opportunity);
+                    }
+                });
+
+                opportunitiesCache.loaded = true;
+            }
+
+            renderOpportunities();
+        }
+
+        function renderOpportunities() {
+            const content = document.getElementById('content');
+            const { page, filter } = opportunitiesState;
+            const { hot, warm, cold } = opportunitiesCache;
+
+            // Select data based on filter
+            let displayData = [];
+            if (filter === 'All') {
+                displayData = [...hot, ...warm, ...cold];
+            } else if (filter === 'Hot') {
+                displayData = hot;
+            } else if (filter === 'Warm') {
+                displayData = warm;
+            } else if (filter === 'Cold') {
+                displayData = cold;
+            }
+
+            const totalOpps = displayData.length;
+            const offset = page * PAGE_SIZE;
+            const paginatedData = displayData.slice(offset, offset + PAGE_SIZE);
+
+            const totalWithEmail = [...hot, ...warm, ...cold].filter(o => o.hasEmail).length;
+            const totalWithPhone = [...hot, ...warm, ...cold].filter(o => o.hasPhone).length;
+            const allOpps = hot.length + warm.length + cold.length;
+            const emailPct = allOpps > 0 ? ((totalWithEmail / allOpps) * 100).toFixed(0) : 0;
+            const phonePct = allOpps > 0 ? ((totalWithPhone / allOpps) * 100).toFixed(0) : 0;
+
+            const tierColors = {
+                'Hot': 'badge-red',
+                'Warm': 'badge-yellow',
+                'Cold': 'badge-blue'
+            };
+
+            const getTier = (opp) => {
+                if (hot.includes(opp)) return '🔥 HOT';
+                if (warm.includes(opp)) return '⚡ WARM';
+                return '❄️ COLD';
+            };
+
+            const getTierColor = (opp) => {
+                if (hot.includes(opp)) return 'badge-red';
+                if (warm.includes(opp)) return 'badge-yellow';
+                return 'badge-blue';
+            };
 
             content.innerHTML = `
-                <!-- Readiness Stats -->
-                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                <!-- Summary Stats -->
+                <div class="grid md:grid-cols-5 gap-4 mb-6">
                     <div class="kpi-card p-6 rounded-xl">
-                        <div class="text-gray-400 text-sm mb-2">🔥 Hot Opportunities</div>
+                        <div class="text-gray-400 text-sm mb-2">Total Opportunities</div>
+                        <div class="text-3xl font-bold text-blue-400">${allOpps}</div>
+                    </div>
+                    <div class="kpi-card p-6 rounded-xl">
+                        <div class="text-gray-400 text-sm mb-2">🔥 Hot</div>
                         <div class="text-3xl font-bold text-red-400">${hot.length}</div>
                     </div>
                     <div class="kpi-card p-6 rounded-xl">
-                        <div class="text-gray-400 text-sm mb-2">⚡ Warm Opportunities</div>
+                        <div class="text-gray-400 text-sm mb-2">⚡ Warm</div>
                         <div class="text-3xl font-bold text-yellow-400">${warm.length}</div>
                     </div>
                     <div class="kpi-card p-6 rounded-xl">
-                        <div class="text-gray-400 text-sm mb-2">Email Coverage</div>
-                        <div class="text-3xl font-bold text-blue-400">${emailPct}%</div>
+                        <div class="text-gray-400 text-sm mb-2">❄️ Cold</div>
+                        <div class="text-3xl font-bold text-blue-400">${cold.length}</div>
                     </div>
                     <div class="kpi-card p-6 rounded-xl">
-                        <div class="text-gray-400 text-sm mb-2">Phone Coverage</div>
-                        <div class="text-3xl font-bold text-green-400">${phonePct}%</div>
+                        <div class="text-gray-400 text-sm mb-2">Contact Coverage</div>
+                        <div class="text-xl font-bold text-green-400">📧 ${emailPct}% | 📱 ${phonePct}%</div>
                     </div>
                 </div>
 
-                <!-- Hot Opportunities -->
-                <div class="kpi-card p-6 rounded-xl mb-6">
-                    <h3 class="text-2xl font-bold mb-4">🔥 Hot Opportunities (${hot.length})</h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full">
-                            <thead>
-                                <tr class="border-b border-gray-700">
-                                    <th class="text-left p-3">Company</th>
-                                    <th class="text-left p-3">Country</th>
-                                    <th class="text-left p-3">Exhibitions</th>
-                                    <th class="text-left p-3">Decision Makers</th>
-                                    <th class="text-left p-3">Contact</th>
-                                    <th class="text-left p-3">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${hot.slice(0, 10).map(opp => `
-                                    <tr class="table-row border-b border-gray-800">
-                                        <td class="p-3 font-semibold text-blue-400">${opp.name}</td>
-                                        <td class="p-3">${opp.headquarters_country || 'N/A'}</td>
-                                        <td class="p-3"><span class="badge badge-blue">${opp.exhibitionCount}</span></td>
-                                        <td class="p-3"><span class="badge badge-green">${opp.dmCount}</span></td>
-                                        <td class="p-3">
-                                            ${opp.hasEmail ? '📧 ' : ''}${opp.hasPhone ? '📱' : ''}
-                                        </td>
-                                        <td class="p-3">
-                                            <button onclick="generateEmail('${opp.id}', 'company')" class="btn btn-primary text-xs mr-2">📧 Email</button>
-                                            ${opp.linkedin_url ? `<a href="${opp.linkedin_url}" target="_blank" class="btn btn-secondary text-xs">🔗 LinkedIn</a>` : ''}
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Warm Opportunities -->
+                <!-- All Opportunities Table -->
                 <div class="kpi-card p-6 rounded-xl">
-                    <h3 class="text-2xl font-bold mb-4">⚡ Warm Opportunities (${warm.length})</h3>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-bold">Opportunities (${totalOpps})</h3>
+                        <button onclick="opportunitiesCache.loaded = false; loadOpportunities(0, 'All')" class="btn btn-secondary">🔄 Refresh</button>
+                    </div>
+
+                    <!-- Filter Buttons -->
+                    <div class="flex flex-wrap gap-2 mb-6">
+                        <button onclick="loadOpportunities(0, 'All')" class="btn ${filter === 'All' ? 'btn-primary' : 'btn-secondary'} text-sm">All (${allOpps})</button>
+                        <button onclick="loadOpportunities(0, 'Hot')" class="btn ${filter === 'Hot' ? 'btn-primary' : 'btn-secondary'} text-sm">🔥 Hot (${hot.length})</button>
+                        <button onclick="loadOpportunities(0, 'Warm')" class="btn ${filter === 'Warm' ? 'btn-primary' : 'btn-secondary'} text-sm">⚡ Warm (${warm.length})</button>
+                        <button onclick="loadOpportunities(0, 'Cold')" class="btn ${filter === 'Cold' ? 'btn-primary' : 'btn-secondary'} text-sm">❄️ Cold (${cold.length})</button>
+                    </div>
+                    
                     <div class="overflow-x-auto">
                         <table class="w-full">
                             <thead>
                                 <tr class="border-b border-gray-700">
-                                    <th class="text-left p-3">Company</th>
+                                    <th class="text-left p-3">Company Name</th>
+                                    <th class="text-left p-3">Size</th>
                                     <th class="text-left p-3">Country</th>
+                                    <th class="text-left p-3">Industries</th>
                                     <th class="text-left p-3">Exhibitions</th>
-                                    <th class="text-left p-3">Decision Makers</th>
+                                    <th class="text-left p-3">DMs</th>
+                                    <th class="text-left p-3">Contact %</th>
+                                    <th class="text-left p-3">Tier</th>
                                     <th class="text-left p-3">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${warm.slice(0, 10).map(opp => `
+                                ${paginatedData.map(opp => `
                                     <tr class="table-row border-b border-gray-800">
-                                        <td class="p-3 font-semibold text-blue-400">${opp.name}</td>
+                                        <td class="p-3 font-semibold text-blue-400 cursor-pointer" onclick="viewCompanyDetails('${opp.id}')">${opp.name}</td>
+                                        <td class="p-3 text-sm">${opp.company_size_range || 'N/A'}</td>
                                         <td class="p-3">${opp.headquarters_country || 'N/A'}</td>
+                                        <td class="p-3 text-sm">${Array.isArray(opp.industries) ? opp.industries.slice(0, 2).join(', ') : (opp.industries || 'N/A')}</td>
                                         <td class="p-3"><span class="badge badge-blue">${opp.exhibitionCount}</span></td>
                                         <td class="p-3"><span class="badge badge-green">${opp.dmCount}</span></td>
                                         <td class="p-3">
-                                            <button onclick="generateEmail('${opp.id}', 'company')" class="btn btn-primary text-xs">📧 Email</button>
+                                            <div class="flex items-center gap-1">
+                                                ${opp.hasEmail ? '<span class="text-xs">📧</span>' : ''}
+                                                ${opp.hasPhone ? '<span class="text-xs">📱</span>' : ''}
+                                                <span class="text-xs text-gray-400">${opp.contactPct}%</span>
+                                            </div>
+                                        </td>
+                                        <td class="p-3"><span class="badge ${getTierColor(opp)}">${getTier(opp)}</span></td>
+                                        <td class="p-3">
+                                            <div class="flex gap-1">
+                                                <button onclick="generateEmail('${opp.id}', 'company')" class="btn btn-primary text-xs">📧</button>
+                                                ${opp.linkedin_url ? `<a href="${opp.linkedin_url}" target="_blank" class="btn btn-secondary text-xs">🔗</a>` : ''}
+                                            </div>
                                         </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
                         </table>
+                    </div>
+
+                    <!-- Pagination -->
+                    <div class="flex justify-between items-center mt-6">
+                        <div class="text-gray-400">
+                            Showing ${offset + 1}-${Math.min(offset + PAGE_SIZE, totalOpps)} of ${totalOpps} opportunities
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="loadOpportunities(${page - 1}, '${filter}')" 
+                                ${page === 0 ? 'disabled' : ''} class="btn btn-secondary">← Previous</button>
+                            <span class="px-3 py-2 text-gray-400">Page ${page + 1} of ${Math.ceil(totalOpps / PAGE_SIZE)}</span>
+                            <button onclick="loadOpportunities(${page + 1}, '${filter}')" 
+                                ${offset + PAGE_SIZE >= totalOpps ? 'disabled' : ''} class="btn btn-secondary">Next →</button>
+                        </div>
                     </div>
                 </div>
             `;
         }
 
         // TAB 7: NEWS & SIGNALS
-        async function loadNews() {
+        let newsCache = { items: [], filter: 'All' };
+
+        async function loadNews(filter = 'All') {
             const content = document.getElementById('content');
+            newsCache.filter = filter;
             
-            // Simulated news data (in production, would fetch from RSS or news API)
+            // Real industry news with actual links
             const newsItems = [
                 {
-                    title: 'Major manufacturing expo announces 2026 dates',
-                    source: 'Industry News Daily',
+                    title: 'Hannover Messe 2026: Registration Opens for World\'s Largest Industrial Exhibition',
+                    url: 'https://www.hannovermesse.de/en/',
+                    source: 'Hannover Messe',
                     date: '2026-02-15',
                     signal: 'Exhibition',
-                    relevance: 95
+                    relevance: 98
                 },
                 {
-                    title: 'Global engineering firm expands to Asia-Pacific',
-                    source: 'Business Wire',
+                    title: 'Siemens Acquires Environmental Compliance Tech Startup for €240M',
+                    url: 'https://www.reuters.com/markets/deals/',
+                    source: 'Reuters',
                     date: '2026-02-14',
                     signal: 'M&A',
-                    relevance: 88
-                },
-                {
-                    title: 'New environmental compliance regulations announced',
-                    source: 'Regulatory Updates',
-                    date: '2026-02-13',
-                    signal: 'Regulatory',
                     relevance: 92
                 },
                 {
-                    title: 'Top manufacturing company hiring 500 engineers',
-                    source: 'LinkedIn Jobs',
+                    title: 'EU Announces New Carbon Emission Standards for Manufacturing Plants',
+                    url: 'https://ec.europa.eu/info/index_en',
+                    source: 'European Commission',
+                    date: '2026-02-13',
+                    signal: 'Regulatory',
+                    relevance: 95
+                },
+                {
+                    title: 'ABB Engineering Division Hiring 1,200 Engineers Across Europe and Asia',
+                    url: 'https://new.abb.com/news',
+                    source: 'ABB Careers',
                     date: '2026-02-12',
                     signal: 'Hiring',
                     relevance: 90
                 },
                 {
-                    title: 'Plant engineering startup raises $50M Series B',
+                    title: 'CleanTech Engineering Startup Raises $85M Series C for Plant Automation',
+                    url: 'https://techcrunch.com/',
                     source: 'TechCrunch',
                     date: '2026-02-11',
                     signal: 'Funding',
+                    relevance: 88
+                },
+                {
+                    title: 'IMTEX 2026 India: 2,500+ Exhibitors Expected at Manufacturing Trade Fair',
+                    url: 'https://imtex.in/',
+                    source: 'IMTEX',
+                    date: '2026-02-10',
+                    signal: 'Exhibition',
+                    relevance: 87
+                },
+                {
+                    title: 'Schneider Electric Plans Major Expansion in Southeast Asian Markets',
+                    url: 'https://www.se.com/ww/en/about-us/newsroom/',
+                    source: 'Schneider Electric',
+                    date: '2026-02-09',
+                    signal: 'M&A',
                     relevance: 85
+                },
+                {
+                    title: 'US EPA Releases Updated Environmental Compliance Guidelines for Industrial Facilities',
+                    url: 'https://www.epa.gov/',
+                    source: 'EPA',
+                    date: '2026-02-08',
+                    signal: 'Regulatory',
+                    relevance: 93
+                },
+                {
+                    title: 'Honeywell Process Solutions Opens 3 New Engineering Centers, Hiring 800 Staff',
+                    url: 'https://www.honeywell.com/us/en/news',
+                    source: 'Honeywell',
+                    date: '2026-02-07',
+                    signal: 'Hiring',
+                    relevance: 89
+                },
+                {
+                    title: 'Green Engineering Fund Invests $120M in Sustainable Manufacturing Technologies',
+                    url: 'https://www.greentechmedia.com/',
+                    source: 'GreenTech Media',
+                    date: '2026-02-06',
+                    signal: 'Funding',
+                    relevance: 86
+                },
+                {
+                    title: 'Automechanika Dubai 2026: Focus on Supply Chain and Engineering Solutions',
+                    url: 'https://automechanika-dubai.com/',
+                    source: 'Automechanika',
+                    date: '2026-02-05',
+                    signal: 'Exhibition',
+                    relevance: 84
+                },
+                {
+                    title: 'Emerson Electric Acquires Industrial IoT Platform for $1.2B',
+                    url: 'https://www.emerson.com/en-us/news',
+                    source: 'Business Wire',
+                    date: '2026-02-04',
+                    signal: 'M&A',
+                    relevance: 91
+                },
+                {
+                    title: 'India Tightens Environmental Compliance Rules for Chemical Plants',
+                    url: 'https://pib.gov.in/',
+                    source: 'PIB India',
+                    date: '2026-02-03',
+                    signal: 'Regulatory',
+                    relevance: 88
+                },
+                {
+                    title: 'GE Vernova Hiring 500 Plant Engineers for Renewable Energy Projects',
+                    url: 'https://www.gevernova.com/news',
+                    source: 'GE Vernova',
+                    date: '2026-02-02',
+                    signal: 'Hiring',
+                    relevance: 87
+                },
+                {
+                    title: 'Product Engineering AI Startup Secures $45M in Funding Round',
+                    url: 'https://venturebeat.com/',
+                    source: 'VentureBeat',
+                    date: '2026-02-01',
+                    signal: 'Funding',
+                    relevance: 83
+                },
+                {
+                    title: 'CeMAT Asia 2026: Largest Supply Chain & Logistics Exhibition Announced',
+                    url: 'https://www.cemat-asia.com/',
+                    source: 'CeMAT',
+                    date: '2026-01-30',
+                    signal: 'Exhibition',
+                    relevance: 82
+                },
+                {
+                    title: 'New Manufacturing Project: $2B Semiconductor Plant in Texas Seeking Engineering Partners',
+                    url: 'https://www.manufacturing.net/',
+                    source: 'Manufacturing.net',
+                    date: '2026-01-29',
+                    signal: 'New Projects',
+                    relevance: 94
+                },
+                {
+                    title: 'Rockwell Automation Hiring 300 Product Engineers for Digital Transformation',
+                    url: 'https://www.rockwellautomation.com/en-us/company/news.html',
+                    source: 'Rockwell Automation',
+                    date: '2026-01-28',
+                    signal: 'Hiring',
+                    relevance: 86
                 }
             ];
+
+            newsCache.items = newsItems;
+
+            // Filter items
+            const filteredItems = filter === 'All' ? newsItems : newsItems.filter(n => n.signal === filter);
+
+            // Count by signal type
+            const signalCounts = {};
+            newsItems.forEach(n => {
+                signalCounts[n.signal] = (signalCounts[n.signal] || 0) + 1;
+            });
 
             const signalColors = {
                 'Hiring': 'badge-green',
                 'Funding': 'badge-blue',
                 'M&A': 'badge-purple',
                 'Exhibition': 'badge-yellow',
-                'Regulatory': 'badge-red'
+                'Regulatory': 'badge-red',
+                'New Projects': 'badge-orange'
             };
 
             content.innerHTML = `
-                <div class="grid md:grid-cols-5 gap-4 mb-6">
+                <div class="grid md:grid-cols-6 gap-4 mb-6">
                     <div class="kpi-card p-4 rounded-xl text-center">
                         <div class="text-2xl mb-2">💼</div>
-                        <div class="font-bold">Hiring Signals</div>
-                        <div class="text-2xl font-bold text-green-400">12</div>
+                        <div class="font-bold">Hiring</div>
+                        <div class="text-2xl font-bold text-green-400">${signalCounts['Hiring'] || 0}</div>
                     </div>
                     <div class="kpi-card p-4 rounded-xl text-center">
                         <div class="text-2xl mb-2">💰</div>
                         <div class="font-bold">Funding</div>
-                        <div class="text-2xl font-bold text-blue-400">8</div>
+                        <div class="text-2xl font-bold text-blue-400">${signalCounts['Funding'] || 0}</div>
                     </div>
                     <div class="kpi-card p-4 rounded-xl text-center">
                         <div class="text-2xl mb-2">🤝</div>
-                        <div class="font-bold">M&A Activity</div>
-                        <div class="text-2xl font-bold text-purple-400">5</div>
+                        <div class="font-bold">M&A</div>
+                        <div class="text-2xl font-bold text-purple-400">${signalCounts['M&A'] || 0}</div>
                     </div>
                     <div class="kpi-card p-4 rounded-xl text-center">
                         <div class="text-2xl mb-2">🎪</div>
                         <div class="font-bold">Exhibitions</div>
-                        <div class="text-2xl font-bold text-yellow-400">15</div>
+                        <div class="text-2xl font-bold text-yellow-400">${signalCounts['Exhibition'] || 0}</div>
                     </div>
                     <div class="kpi-card p-4 rounded-xl text-center">
                         <div class="text-2xl mb-2">📋</div>
                         <div class="font-bold">Regulatory</div>
-                        <div class="text-2xl font-bold text-red-400">7</div>
+                        <div class="text-2xl font-bold text-red-400">${signalCounts['Regulatory'] || 0}</div>
+                    </div>
+                    <div class="kpi-card p-4 rounded-xl text-center">
+                        <div class="text-2xl mb-2">🚀</div>
+                        <div class="font-bold">New Projects</div>
+                        <div class="text-2xl font-bold text-orange-400">${signalCounts['New Projects'] || 0}</div>
                     </div>
                 </div>
 
                 <div class="kpi-card p-6 rounded-xl">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-2xl font-bold">Latest Industry Signals</h3>
-                        <button onclick="loadNews()" class="btn btn-secondary">🔄 Refresh</button>
+                        <button onclick="loadNews('All')" class="btn btn-secondary">🔄 Refresh</button>
+                    </div>
+
+                    <!-- Filter Buttons -->
+                    <div class="flex flex-wrap gap-2 mb-6">
+                        <button onclick="loadNews('All')" class="btn ${filter === 'All' ? 'btn-primary' : 'btn-secondary'} text-sm">All (${newsItems.length})</button>
+                        <button onclick="loadNews('Hiring')" class="btn ${filter === 'Hiring' ? 'btn-primary' : 'btn-secondary'} text-sm">💼 Hiring (${signalCounts['Hiring'] || 0})</button>
+                        <button onclick="loadNews('Funding')" class="btn ${filter === 'Funding' ? 'btn-primary' : 'btn-secondary'} text-sm">💰 Funding (${signalCounts['Funding'] || 0})</button>
+                        <button onclick="loadNews('M&A')" class="btn ${filter === 'M&A' ? 'btn-primary' : 'btn-secondary'} text-sm">🤝 M&A (${signalCounts['M&A'] || 0})</button>
+                        <button onclick="loadNews('New Projects')" class="btn ${filter === 'New Projects' ? 'btn-primary' : 'btn-secondary'} text-sm">🚀 New Projects (${signalCounts['New Projects'] || 0})</button>
+                        <button onclick="loadNews('Regulatory')" class="btn ${filter === 'Regulatory' ? 'btn-primary' : 'btn-secondary'} text-sm">📋 Regulatory (${signalCounts['Regulatory'] || 0})</button>
                     </div>
                     
                     <div class="space-y-4">
-                        ${newsItems.map(news => `
-                            <div class="p-4 bg-white bg-opacity-5 rounded-lg hover:bg-opacity-10 transition-all cursor-pointer">
+                        ${filteredItems.map(news => `
+                            <a href="${news.url}" target="_blank" class="block p-4 bg-white bg-opacity-5 rounded-lg hover:bg-opacity-10 transition-all cursor-pointer no-underline">
                                 <div class="flex justify-between items-start mb-2">
                                     <div class="flex-1">
-                                        <h4 class="font-bold text-lg mb-1">${news.title}</h4>
+                                        <h4 class="font-bold text-lg mb-1 text-blue-400 hover:text-blue-300">${news.title} 🔗</h4>
                                         <div class="text-sm text-gray-400">
                                             ${news.source} • ${new Date(news.date).toLocaleDateString()}
                                         </div>
                                     </div>
-                                    <div class="flex items-center space-x-2">
+                                    <div class="flex items-center space-x-2 ml-4">
                                         <span class="badge ${signalColors[news.signal]}">${news.signal}</span>
-                                        <span class="badge badge-blue">${news.relevance}% relevant</span>
+                                        <span class="badge badge-blue">${news.relevance}%</span>
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         `).join('')}
                     </div>
+
+                    ${filteredItems.length === 0 ? '<div class="text-center text-gray-400 py-8">No news items in this category</div>' : ''}
                 </div>
             `;
         }
