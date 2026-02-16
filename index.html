@@ -258,6 +258,12 @@
 
         // API Functions
         async function fetchSupabase(table, options = {}) {
+            if (!CONFIG.SUPABASE_URL) {
+                console.error('CONFIG not loaded yet. Retrying in 1s...');
+                await new Promise(r => setTimeout(r, 1000));
+                if (window.SSD_CONFIG) Object.assign(CONFIG, window.SSD_CONFIG);
+                if (!CONFIG.SUPABASE_URL) { showToast('Config not loaded. Refresh the page.', 'error'); return []; }
+            }
             const { limit = 1000, offset = 0, select = '*', filters = [], order } = options;
             let url = `${CONFIG.SUPABASE_URL}/rest/v1/${table}?select=${select}`;
             
@@ -266,20 +272,27 @@
             if (order) url += `&order=${order}`;
             filters.forEach(f => url += `&${f}`);
 
-            const response = await fetch(url, {
-                headers: {
-                    'apikey': CONFIG.SUPABASE_KEY,
-                    'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`
-                }
-            });
-            return await response.json();
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'apikey': CONFIG.SUPABASE_KEY,
+                        'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`
+                    }
+                });
+                if (!response.ok) { console.error('Supabase error:', response.status, await response.text()); return []; }
+                return await response.json();
+            } catch(e) { console.error('Fetch error for', table, e); showToast(`Failed to load ${table}`, 'error'); return []; }
         }
 
         async function fetchSalesRobot(endpoint) {
-            const response = await fetch(`${CONFIG.SALESROBOT_API}${endpoint}`, {
-                headers: { 'authorization': CONFIG.SALESROBOT_KEY }
-            });
-            return await response.json();
+            if (!CONFIG.SALESROBOT_API) return [];
+            try {
+                const response = await fetch(`${CONFIG.SALESROBOT_API}${endpoint}`, {
+                    headers: { 'authorization': CONFIG.SALESROBOT_KEY }
+                });
+                if (!response.ok) { console.error('SalesRobot error:', response.status); return []; }
+                return await response.json();
+            } catch(e) { console.error('SalesRobot fetch error:', e); return []; }
         }
 
         async function generateAIContent(prompt, maxTokens = 500) {
